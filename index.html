@@ -69,6 +69,14 @@ h2{
   margin-top: 12px;
   margin-bottom: 18px;
 }
+#midiLibrary{
+  width:230px;
+  max-width:30%;
+  padding:10px 14px;
+  color:white;
+  text-transform:none;
+  letter-spacing:0;
+}
 .tempoText{
   font-weight:bold; font-size:16px; letter-spacing:1px; color:white;
   text-shadow:0 0 6px rgba(0,170,255,0.8);
@@ -315,7 +323,7 @@ h2{
           <span class="btnLabel">Cargar MIDI</span>
         </button>
         <input type="file" id="midiInput" accept=".mid,.midi" hidden />
-        <span id="midiFileName" class="filename">Ningún archivo seleccionado</span>
+        <span id="midiFileName" class="filename" role="status" aria-live="polite">Ningún archivo seleccionado</span>
 
         <button id="startBtn" class="ghButton on" aria-pressed="false">
           <span class="btnLabel">Iniciar</span>
@@ -334,6 +342,12 @@ h2{
       </div>
 
       <div id="tempoRow">
+        <select id="midiLibrary" class="ghButton off" aria-label="Cargar una canción MIDI">
+          <option value="">Canciones MIDI...</option>
+          <option value="canon-pachelbel">Canon de Pachelbel</option>
+          <option value="castle-in-the-sky">Castle in the Sky</option>
+          <option value="cumpleanos">Cumpleaños</option>
+        </select>
         <span class="tempoText">Tempo <span id="tempoLabel">100%</span></span>
         <input type="range" id="tempoSlider" min="50" max="150" value="100" aria-label="Tempo (50–150%)"/>
       </div>
@@ -953,6 +967,7 @@ const viewP2 = new GameView({
 /* ===== Controles DOM ===== */
 const midiInput = $("#midiInput");
 const midiBtn = $("#midiBtn");
+const midiLibrary = $("#midiLibrary");
 const midiFileName = $("#midiFileName");
 const startBtn = $("#startBtn");
 const stopBtn = $("#stopBtn");
@@ -969,24 +984,77 @@ const player2Pane = $("#player2Pane");
 
 /* ===== MIDI ===== */
 midiBtn.onclick = ()=> midiInput.click();
-midiInput.onchange = async (e)=>{
+const bundledMidiFiles = {
+  "canon-pachelbel": { filename: "Canon Pachelbel D.mid", title: "Canon de Pachelbel" },
+  "castle-in-the-sky": { filename: "Castle in the sky.mid", title: "Castle in the Sky" },
+  "cumpleanos": { filename: "Cumplean\u0303os.mid", title: "Cumpleaños" }
+};
+
+async function loadMidiBuffer(buffer, filename){
   resetAll();
+  midiFileName.textContent = `Cargando ${filename}…`;
+  try{
+    midi = new Midi(buffer);
+    fillTrackSelectors();
+    if(viewP1.trackSel.value !== "") viewP1.prepare(viewP1.trackSel.value, songTime);
+    if(isTwoPlayers && viewP2.trackSel.value !== "") viewP2.prepare(viewP2.trackSel.value, songTime);
+    preparePercussion();
+    viewP1.updateInstrumentLabel();
+    viewP2.updateInstrumentLabel();
+    recomputeSongDuration();
+    midiFileName.textContent = filename;
+    setToggle(midiBtn, true, "MIDI Cargado", "Cargar MIDI");
+    midiLibrary.classList.remove("off");
+    midiLibrary.classList.add("on");
+    return true;
+  }catch(error){
+    console.error(`Error leyendo MIDI "${filename}":`, error);
+    midi = null;
+    midiFileName.textContent = `No se pudo cargar ${filename}`;
+    setToggle(midiBtn, false, "MIDI Cargado", "Cargar MIDI");
+    midiLibrary.classList.remove("on");
+    midiLibrary.classList.add("off");
+    return false;
+  }
+}
+
+midiInput.onchange = async (e)=>{
   const file = e.target.files[0];
   if(!file) return;
-  midiFileName.textContent = file.name;
-  setToggle(midiBtn, true, "MIDI Cargado", "Cargar MIDI");
-  const buffer = await file.arrayBuffer();
-  let parsed = null;
-  try{ parsed = new Midi(buffer); }catch(err){ console.error("Error leyendo MIDI:", err); return; }
-  midi = parsed;
+  midiLibrary.value = "";
+  try{
+    await loadMidiBuffer(await file.arrayBuffer(), file.name);
+  }catch(error){
+    console.error(`No se pudo leer el archivo MIDI "${file.name}":`, error);
+    midiFileName.textContent = `No se pudo leer ${file.name}`;
+  }finally{
+    midiInput.value = "";
+  }
+};
 
-  fillTrackSelectors();
-  if(viewP1.trackSel.value !== "") viewP1.prepare(viewP1.trackSel.value, songTime);
-  if(isTwoPlayers && viewP2.trackSel.value !== "") viewP2.prepare(viewP2.trackSel.value, songTime);
-  preparePercussion();
-  viewP1.updateInstrumentLabel();
-  viewP2.updateInstrumentLabel();
-  recomputeSongDuration();
+midiLibrary.onchange = async ()=>{
+  const song = bundledMidiFiles[midiLibrary.value];
+  if(!song) return;
+
+  resetAll();
+  midi = null;
+  midiFileName.textContent = `Cargando ${song.title}…`;
+  setToggle(midiBtn, false, "MIDI Cargado", "Cargar MIDI");
+  midiLibrary.classList.remove("on");
+  midiLibrary.classList.add("off");
+  midiLibrary.disabled = true;
+  try{
+    const response = await fetch(encodeURIComponent(song.filename));
+    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+    const loaded = await loadMidiBuffer(await response.arrayBuffer(), song.title);
+    if(!loaded) midiLibrary.value = "";
+  }catch(error){
+    console.error(`No se pudo cargar el MIDI "${song.filename}":`, error);
+    midiFileName.textContent = `No se pudo cargar ${song.title}`;
+    midiLibrary.value = "";
+  }finally{
+    midiLibrary.disabled = false;
+  }
 };
 function fillTrackSelectors(){
   const fill = (select)=>{
